@@ -1,0 +1,3 @@
+-keep class com.roox.ecgreader.data.model.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
