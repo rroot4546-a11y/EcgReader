@@ -26,30 +26,15 @@ class ResultActivity : AppCompatActivity() {
         val tvDiagnosis = findViewById<TextView>(R.id.tvDiagnosis)
         val tvExplanation = findViewById<TextView>(R.id.tvExplanation)
         val tvModel = findViewById<TextView>(R.id.tvModelUsed)
+        val tvGraphLabel = findViewById<TextView>(R.id.tvGraphLabel)
         val btnBack = findViewById<TextView>(R.id.btnBack)
 
-        // Load from intent
         val resultText = intent.getStringExtra("result_text") ?: ""
         val imageUriStr = intent.getStringExtra("image_uri") ?: ""
-        val recordId = intent.getIntExtra("record_id", 0)
 
-        // Show uploaded ECG image
+        // Show original ECG image
         if (imageUriStr.isNotBlank()) {
-            try {
-                val uri = Uri.parse(imageUriStr)
-                ivEcg.setImageURI(uri)
-
-                // Extract waveform from the uploaded ECG image and redraw it cleanly
-                val waveform = EcgWaveformExtractor.extractFromUri(this, uri, 800)
-                if (waveform.isNotEmpty()) {
-                    ecgGraph.setEcgDataFromList(waveform, "Extracted ECG")
-                } else {
-                    // Fallback: show demo
-                    ecgGraph.setEcgData(EcgGraphView.generateNormalSinus(75, 500), "Lead II (Demo)")
-                }
-            } catch (_: Exception) {
-                ecgGraph.setEcgData(EcgGraphView.generateNormalSinus(75, 500), "Lead II (Demo)")
-            }
+            try { ivEcg.setImageURI(Uri.parse(imageUriStr)) } catch (_: Exception) { }
         }
 
         // Show model used
@@ -59,11 +44,30 @@ class ResultActivity : AppCompatActivity() {
 
         if (resultText.isNotBlank()) {
             tvExplanation.text = resultText
-            // Extract primary diagnosis from result
-            val diagnosis = extractPrimaryDiagnosis(resultText)
-            tvDiagnosis.text = diagnosis
-        } else if (recordId > 0) {
-            tvDiagnosis.text = "Loading..."
+
+            // Parse AI text to extract ECG parameters, then synthesize a clean waveform
+            val params = EcgWaveformExtractor.parseFromAiText(resultText)
+            val waveform = EcgWaveformExtractor.generateWaveform(params, 800)
+            ecgGraph.setEcgData(waveform, "Lead II (${params.rhythm.uppercase()})")
+
+            // Build graph label
+            val rhythmName = when (params.rhythm) {
+                "afib" -> "Atrial Fibrillation"
+                "aflutter" -> "Atrial Flutter"
+                "vtach" -> "Ventricular Tachycardia"
+                "vfib" -> "Ventricular Fibrillation"
+                "svt" -> "SVT"
+                "bradycardia" -> "Sinus Bradycardia"
+                "heartblock" -> "Heart Block"
+                else -> "Sinus Rhythm"
+            }
+            tvGraphLabel.text = "📊 $rhythmName — ${params.heartRate} bpm" +
+                if (params.stElevation > 0) " | ST↑" else "" +
+                if (params.stDepression > 0) " | ST↓" else "" +
+                if (params.tWaveInverted) " | T inv" else ""
+
+            // Extract primary diagnosis
+            tvDiagnosis.text = extractPrimaryDiagnosis(resultText)
         }
 
         btnBack.setOnClickListener { finish() }
@@ -78,8 +82,8 @@ class ResultActivity : AppCompatActivity() {
                 continue
             }
             if (foundSection) {
-                val clean = line.replace(Regex("[═━]"), "").trim()
-                if (clean.isNotBlank() && !clean.startsWith("═") && !clean.startsWith("[")) {
+                val clean = line.replace(Regex("[═━\\[\\]]"), "").trim()
+                if (clean.isNotBlank() && clean.length > 3) {
                     return "🫀 $clean"
                 }
             }
